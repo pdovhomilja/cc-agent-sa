@@ -7,7 +7,7 @@ export interface CeoInput {
   missionId: string;
   humanMessage: string;
   onCeoText: (text: string) => void;
-  onWorkerProgress: (role: "coder" | "reviewer", text: string) => void;
+  onWorkerProgress: (role: "coder" | "reviewer" | "librarian", text: string) => void;
 }
 
 export interface CeoOutput {
