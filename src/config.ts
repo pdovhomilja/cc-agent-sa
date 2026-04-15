@@ -24,6 +24,7 @@ export const config = {
     repoPath: path.resolve(required("SWARM_REPO_PATH")),
     worktreeRoot: path.resolve(process.env.SWARM_WORKTREE_ROOT ?? "./worktrees"),
     dbPath: path.resolve(process.env.SWARM_DB_PATH ?? "./data/swarm.db"),
+    wikiPath: path.resolve(process.env.SWARM_WIKI_PATH ?? "./wiki"),
     missionTimeoutMs: Number(process.env.SWARM_MISSION_TIMEOUT_MS ?? 30 * 60 * 1000),
   },
 } as const;
