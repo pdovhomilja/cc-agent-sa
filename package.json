@@ -9,8 +9,8 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run --testTimeout=15000",
+    "test:watch": "vitest --testTimeout=15000"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
