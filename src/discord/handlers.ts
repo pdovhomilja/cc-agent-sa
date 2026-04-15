@@ -11,6 +11,7 @@ import { config } from "../config.js";
 import { createMission, getMissionByThread } from "../missions/store.js";
 import { createWorktree } from "../missions/worktree.js";
 import { runCeo } from "../agents/ceo.js";
+import { runLibrarian } from "../agents/librarian.js";
 
 const inflight = new Set<string>();
 const activeDmMission = new Map<string, string>(); // dmChannelId → missionId
@@ -41,6 +42,11 @@ async function handleMessage(msg: Message): Promise<void> {
     return;
   }
 
+  if (msg.content === "/ingest" || msg.content.startsWith("/ingest ")) {
+    await handleIngestInChannel(msg);
+    return;
+  }
+
   const inCeoChannel = msg.channelId === config.discord.ceoChannelId;
   const inMissionThread =
     chType === ChannelType.PublicThread &&
@@ -59,6 +65,32 @@ async function handleMessage(msg: Message): Promise<void> {
 async function handleDm(msg: Message): Promise<void> {
   const dm = msg.channel as DMChannel;
   const content = msg.content.trim();
+
+  if (content === "/ingest" || content.startsWith("/ingest ")) {
+    const payload = content.replace(/^\/ingest\s*/, "").trim();
+    const attachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+    if (!payload && attachments.length === 0) {
+      await dm.send(
+        "📥 `/ingest` usage: `/ingest <url>`, `/ingest <text>`, or send a markdown/text file with `/ingest` as the message."
+      );
+      return;
+    }
+    await dm.send("📚 Librarian is working…");
+    try {
+      const task = buildIngestTask(payload, attachments);
+      const out = await runLibrarian({
+        task,
+        onProgress: (t) => {
+          const snippet = t.slice(0, 1500);
+          dm.send(`📚 **librarian:** ${snippet}`).catch(() => {});
+        },
+      });
+      await sendLong(dm, `📚 **Librarian done:** ${out.summary}`);
+    } catch (err) {
+      await dm.send(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
 
   if (content === "/new" || content.startsWith("/new ")) {
     activeDmMission.delete(dm.id);
@@ -177,4 +209,61 @@ async function sendLong(channel: { send: (content: string) => Promise<unknown> }
   }
   if (rest) chunks.push(rest);
   for (const c of chunks) await channel.send(c);
+}
+
+function buildIngestTask(
+  payload: string,
+  attachments: { name: string | null; url: string }[]
+): string {
+  const parts: string[] = [
+    "A new source has been submitted for ingestion. Follow CLAUDE.md:",
+    "1. If the payload is a URL, call fetch_url to retrieve it.",
+    "2. Summarize the content and create a new page under sources/ with today's date in the filename.",
+    "3. Update or create relevant entity / concept / project pages.",
+    "4. Append a log line for every write.",
+    "5. Update index.md if you created any new top-level pages.",
+    "6. Commit once with an 'ingest:' message.",
+    "",
+    "## Payload",
+    payload || "(none — see attachments)",
+  ];
+  if (attachments.length > 0) {
+    parts.push("", "## Attachments");
+    for (const a of attachments) {
+      parts.push(`- ${a.name ?? "(unnamed)"}: ${a.url}`);
+    }
+  }
+  return parts.join("\n");
+}
+
+async function handleIngestInChannel(msg: Message): Promise<void> {
+  const payload = msg.content.replace(/^\/ingest\s*/, "").trim();
+  const attachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+  if (!payload && attachments.length === 0) {
+    await msg.reply(
+      "📥 `/ingest` usage: `/ingest <url>`, `/ingest <text>`, or send a markdown/text file with `/ingest` as the message."
+    );
+    return;
+  }
+  await msg.reply("📚 Librarian is working…");
+  try {
+    const task = buildIngestTask(payload, attachments);
+    const out = await runLibrarian({
+      task,
+      onProgress: (t) => {
+        const snippet = t.slice(0, 1500);
+        if (msg.channel.isTextBased() && "send" in msg.channel) {
+          (msg.channel as { send: (c: string) => Promise<unknown> }).send(`📚 **librarian:** ${snippet}`).catch(() => {});
+        }
+      },
+    });
+    if (msg.channel.isTextBased() && "send" in msg.channel) {
+      await sendLong(
+        { send: (c: string) => (msg.channel as { send: (c: string) => Promise<unknown> }).send(c) },
+        `📚 **Librarian done:** ${out.summary}`
+      );
+    }
+  } catch (err) {
+    await msg.reply(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
