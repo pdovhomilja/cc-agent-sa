@@ -3,6 +3,13 @@ import { LIBRARIAN_SYSTEM_PROMPT } from "./prompts.js";
 import { buildLibrarianMcpServer } from "../tools/wiki.js";
 import { config } from "../config.js";
 
+export class LibrarianTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Librarian session timed out after ${timeoutMs}ms`);
+    this.name = "LibrarianTimeoutError";
+  }
+}
+
 export interface LibrarianInput {
   task: string;
   onProgress?: (text: string) => void;
@@ -35,26 +42,42 @@ export async function runLibrarian(input: LibrarianInput): Promise<LibrarianOutp
     },
   });
 
-  let summary = "";
-  let sessionId = "";
+  const timeoutMs = config.swarm.librarianTimeoutMs;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new LibrarianTimeoutError(timeoutMs)),
+      timeoutMs
+    );
+    timeoutHandle.unref();
+  });
 
-  for await (const msg of result) {
-    if (msg.type === "system" && msg.subtype === "init") {
-      sessionId = msg.session_id;
-    }
-    if (msg.type === "assistant") {
-      for (const block of msg.message.content) {
-        if (block.type === "text") {
-          summary += block.text;
-          input.onProgress?.(block.text);
+  const runPromise = (async (): Promise<LibrarianOutput> => {
+    let summary = "";
+    let sessionId = "";
+    for await (const msg of result) {
+      if (msg.type === "system" && msg.subtype === "init") {
+        sessionId = msg.session_id;
+      }
+      if (msg.type === "assistant") {
+        for (const block of msg.message.content) {
+          if (block.type === "text") {
+            summary += block.text;
+            input.onProgress?.(block.text);
+          }
         }
       }
+      if (msg.type === "result") {
+        if (msg.subtype === "success") summary = msg.result;
+        sessionId = msg.session_id;
+      }
     }
-    if (msg.type === "result") {
-      if (msg.subtype === "success") summary = msg.result;
-      sessionId = msg.session_id;
-    }
-  }
+    return { summary, sessionId };
+  })();
 
-  return { summary, sessionId };
+  try {
+    return await Promise.race([runPromise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
 }
