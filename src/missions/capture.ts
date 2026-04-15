@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getMission } from "./store.js";
 import { getDiff } from "./worktree.js";
-import { runLibrarian } from "../agents/librarian.js";
+import { runLibrarian, LibrarianTimeoutError } from "../agents/librarian.js";
 import { config } from "../config.js";
 
 export interface CaptureTaskInput {
@@ -58,14 +58,18 @@ export function captureMissionInBackground(missionId: string): void {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const errDir = path.join(config.swarm.wikiPath, "inbox", "_errors");
       const errMsg = err instanceof Error ? err.message : String(err);
-      const likelyConcurrent = /lock|index|working tree|conflict/i.test(errMsg);
+      const isTimeout = err instanceof LibrarianTimeoutError;
+      const isConcurrent = !isTimeout && /lock|index|working tree|conflict/i.test(errMsg);
+      const cause = isTimeout
+        ? "likely cause: librarian session timeout\n"
+        : isConcurrent
+          ? "likely cause: concurrent capture / git collision\n"
+          : "";
       try {
         fs.mkdirSync(errDir, { recursive: true });
         fs.writeFileSync(
           path.join(errDir, `${stamp}-capture-${missionId}.md`),
-          `# Capture failed\n\nmission: ${missionId}\n${
-            likelyConcurrent ? "likely cause: concurrent capture / git collision\n" : ""
-          }error: ${errMsg}\n`,
+          `# Capture failed\n\nmission: ${missionId}\n${cause}error: ${errMsg}\n`,
           "utf8"
         );
       } catch (innerErr) {
