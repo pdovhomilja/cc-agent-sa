@@ -11,7 +11,7 @@ export const config = {
   discord: {
     token: required("DISCORD_TOKEN"),
     ceoChannelId: required("DISCORD_CEO_CHANNEL_ID"),
-    workshopChannelId: required("DISCORD_WORKSHOP_CHANNEL_ID"),
+    workshopChannelId: process.env.DISCORD_WORKSHOP_CHANNEL_ID || required("DISCORD_CEO_CHANNEL_ID"),
     allowedUserIds: required("DISCORD_ALLOWED_USER_IDS")
       .split(",")
       .map((s) => s.trim())

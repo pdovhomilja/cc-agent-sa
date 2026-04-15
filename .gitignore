@@ -4,5 +4,6 @@ dist
 .env.local
 data/
 worktrees/
+sandbox-repo/
 *.log
 .DS_Store
