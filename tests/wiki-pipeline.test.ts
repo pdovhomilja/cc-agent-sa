@@ -25,7 +25,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("librarian pipeline end-to-end (fs + git)", () => {
+describe("wiki pipeline end-to-end (fs + git)", () => {
   it("creates a page, logs it, and commits atomically", async () => {
     writeWikiPage(
       root,
