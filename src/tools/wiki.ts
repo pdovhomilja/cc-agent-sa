@@ -84,8 +84,11 @@ const commit = tool(
 const fetchUrl = tool(
   "fetch_url",
   "Fetch a URL and return its text content. Use for ingesting external sources.",
-  { url: z.string().url().describe("The URL to fetch.") },
+  { url: z.string().url().describe("The URL to fetch. Must be https://.") },
   async (args) => {
+    if (!args.url.startsWith("https://")) {
+      throw new Error(`fetch_url rejected: only https:// URLs are allowed, got ${args.url}`);
+    }
     const res = await fetch(args.url);
     if (!res.ok) throw new Error(`fetch ${args.url} failed: ${res.status}`);
     const text = await res.text();

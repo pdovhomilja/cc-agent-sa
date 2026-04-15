@@ -31,7 +31,7 @@ export async function runLibrarian(input: LibrarianInput): Promise<LibrarianOutp
         "mcp__swarm-wiki__commit_wiki",
         "mcp__swarm-wiki__fetch_url",
       ],
-      permissionMode: "acceptEdits",
+      permissionMode: "default",
     },
   });
 
