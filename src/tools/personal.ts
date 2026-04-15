@@ -71,7 +71,7 @@ export function buildPersonalToolsMcpServer(role: string, missionId: string | nu
 
   const submitTool = tool(
     "submit_to_librarian",
-    "Submit a durable finding, fact, or observation for the Librarian to consider filing into the wiki. Fire-and-forget — the Librarian will process it on its next task. Use for anything worth remembering beyond this mission.",
+    "Submit a durable finding, fact, or observation for the Librarian to file into the wiki. Fire-and-forget — the note lands in wiki/inbox/ and the Librarian will process it the next time it runs. Use for anything worth remembering beyond this mission.",
     {
       note: z.string().describe("The note content in markdown. Be specific and self-contained."),
     },

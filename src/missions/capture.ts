@@ -8,7 +8,6 @@ import { config } from "../config.js";
 export interface CaptureTaskInput {
   missionId: string;
   brief: string;
-  verdict: "APPROVE" | "REJECT";
   diff: string;
 }
 
@@ -25,7 +24,7 @@ export function buildCaptureTask(input: CaptureTaskInput): string {
     ``,
     `## Mission`,
     `- id: ${input.missionId}`,
-    `- verdict: ${input.verdict}`,
+    `- verdict: APPROVE`,
     `- brief: ${input.brief}`,
     ``,
     `## Diff`,
@@ -52,20 +51,21 @@ export function captureMissionInBackground(missionId: string): void {
       const task = buildCaptureTask({
         missionId: mission.id,
         brief: mission.brief,
-        verdict: "APPROVE",
         diff,
       });
       await runLibrarian({ task });
     } catch (err) {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const errDir = path.join(config.swarm.wikiPath, "inbox", "_errors");
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const likelyConcurrent = /lock|index|working tree|conflict/i.test(errMsg);
       try {
         fs.mkdirSync(errDir, { recursive: true });
         fs.writeFileSync(
           path.join(errDir, `${stamp}-capture-${missionId}.md`),
-          `# Capture failed\n\nmission: ${missionId}\nerror: ${
-            err instanceof Error ? err.message : String(err)
-          }\n`,
+          `# Capture failed\n\nmission: ${missionId}\n${
+            likelyConcurrent ? "likely cause: concurrent capture / git collision\n" : ""
+          }error: ${errMsg}\n`,
           "utf8"
         );
       } catch (innerErr) {

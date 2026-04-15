@@ -14,8 +14,7 @@ describe("buildCaptureTask", () => {
     const task = buildCaptureTask({
       missionId: "abc123",
       brief: "Add rate limiting to /api/auth/login",
-      verdict: "APPROVE",
-      diff: "diff --git a/foo b/foo\n+const x = 1",
+      diff:"diff --git a/foo b/foo\n+const x = 1",
     });
     expect(task).toMatch(/abc123/);
     expect(task).toMatch(/Add rate limiting/);
@@ -29,8 +28,7 @@ describe("buildCaptureTask", () => {
     const task = buildCaptureTask({
       missionId: "m",
       brief: "b",
-      verdict: "APPROVE",
-      diff: hugeDiff,
+      diff:hugeDiff,
     });
     expect(task.length).toBeLessThan(20_000);
     expect(task).toMatch(/truncated/);
@@ -40,8 +38,7 @@ describe("buildCaptureTask", () => {
     const task = buildCaptureTask({
       missionId: "m",
       brief: "b",
-      verdict: "APPROVE",
-      diff: "d",
+      diff:"d",
     });
     expect(task).toMatch(/entity|concept|project/i);
   });
