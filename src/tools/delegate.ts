@@ -5,6 +5,7 @@ import { runReviewer } from "../agents/reviewer.js";
 import { runLibrarian } from "../agents/librarian.js";
 import { getMission, updateMissionStatus } from "../missions/store.js";
 import { getDiff } from "../missions/worktree.js";
+import { captureMissionInBackground } from "../missions/capture.js";
 
 export interface DelegateContext {
   missionId: string;
@@ -80,6 +81,9 @@ export function buildDelegateMcpServer(ctx: DelegateContext) {
       });
 
       updateMissionStatus(mission.id, out.verdict === "APPROVE" ? "awaiting_approval" : "coding");
+      if (out.verdict === "APPROVE") {
+        captureMissionInBackground(mission.id);
+      }
 
       return {
         content: [

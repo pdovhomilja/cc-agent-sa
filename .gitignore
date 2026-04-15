@@ -6,5 +6,6 @@ data/
 worktrees/
 sandbox-repo/
 /wiki/
+/scratchpads/
 *.log
 .DS_Store

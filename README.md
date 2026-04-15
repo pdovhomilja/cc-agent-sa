@@ -94,8 +94,14 @@ The swarm maintains an institutional-memory wiki at `swarm/wiki/` — its own gi
 - **Ingest a source:** DM the bot `/ingest <url-or-text>` or drop a markdown/text attachment with `/ingest` as the message body.
 - **Ask a wiki question:** talk to the CEO normally. It has read-only wiki tools.
 - **Browse:** open `swarm/wiki/` as an Obsidian vault.
+- **Automatic mission capture:** when a reviewer approves a mission, a background Librarian session files it into `wiki/missions/<id>.md` and updates any affected entity/concept/project pages. Runs non-blocking; failures are logged to `wiki/inbox/_errors/`.
+- **Agent scratchpads:** each agent (CEO, Coder, Reviewer) has its own private notes dir under `swarm/scratchpads/<role>/`. Agents use them for in-flight reasoning and lessons they don't want to forget.
+- **Cross-agent notes:** any agent can call `submit_to_librarian` with a durable finding. The Librarian picks it up from `wiki/inbox/` on its next task.
 
-Configure the wiki location with `SWARM_WIKI_PATH` in `.env` (defaults to `./wiki`).
+Environment variables:
+
+- `SWARM_WIKI_PATH` — wiki location (default `./wiki`).
+- `SWARM_SCRATCHPAD_ROOT` — scratchpad location (default `./scratchpads`).
 
 ## Extending
 
