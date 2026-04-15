@@ -3,9 +3,6 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../src/missions/store.js", () => ({ getMission: vi.fn() }));
 vi.mock("../src/missions/worktree.js", () => ({ getDiff: vi.fn() }));
 vi.mock("../src/agents/librarian.js", () => ({ runLibrarian: vi.fn() }));
-vi.mock("../src/config.js", () => ({
-  config: { swarm: { wikiPath: "/tmp/fake-wiki" } },
-}));
 
 import { buildCaptureTask } from "../src/missions/capture.js";
 
