@@ -1,6 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { CODER_SYSTEM_PROMPT } from "./prompts.js";
 import { buildWikiReaderMcpServer } from "../tools/wiki.js";
+import { buildPersonalToolsMcpServer } from "../tools/personal.js";
 import { getSession, saveSession } from "../missions/store.js";
 
 export interface CoderInput {
@@ -18,18 +19,27 @@ export interface CoderOutput {
 export async function runCoder(input: CoderInput): Promise<CoderOutput> {
   const resume = getSession(input.missionId, "coder");
   const wikiReader = buildWikiReaderMcpServer();
+  const personal = buildPersonalToolsMcpServer("coder", input.missionId);
 
   const result = query({
     prompt: input.brief,
     options: {
       systemPrompt: CODER_SYSTEM_PROMPT,
       cwd: input.worktreePath,
-      mcpServers: { "swarm-wiki-read": wikiReader },
+      mcpServers: {
+        "swarm-wiki-read": wikiReader,
+        "swarm-personal-coder": personal,
+      },
       allowedTools: [
         "Read", "Write", "Edit", "Glob", "Grep", "Bash",
         "mcp__swarm-wiki-read__read_wiki_page",
         "mcp__swarm-wiki-read__list_wiki_pages",
         "mcp__swarm-wiki-read__search_wiki",
+        "mcp__swarm-personal-coder__read_scratchpad",
+        "mcp__swarm-personal-coder__write_scratchpad",
+        "mcp__swarm-personal-coder__append_scratchpad",
+        "mcp__swarm-personal-coder__list_scratchpad",
+        "mcp__swarm-personal-coder__submit_to_librarian",
       ],
       permissionMode: "acceptEdits",
       resume,
