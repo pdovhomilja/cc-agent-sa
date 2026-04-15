@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.env.local
+data/
+worktrees/
+*.log
+.DS_Store
