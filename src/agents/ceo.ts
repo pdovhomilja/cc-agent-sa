@@ -1,13 +1,14 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { CEO_SYSTEM_PROMPT } from "./prompts.js";
 import { buildDelegateMcpServer, type DelegateContext } from "../tools/delegate.js";
+import { buildWikiReaderMcpServer } from "../tools/wiki.js";
 import { getSession, saveSession } from "../missions/store.js";
 
 export interface CeoInput {
   missionId: string;
   humanMessage: string;
   onCeoText: (text: string) => void;
-  onWorkerProgress: (role: "coder" | "reviewer", text: string) => void;
+  onWorkerProgress: (role: "coder" | "reviewer" | "librarian", text: string) => void;
 }
 
 export interface CeoOutput {
@@ -24,15 +25,23 @@ export async function runCeo(input: CeoInput): Promise<CeoOutput> {
   };
 
   const mcpServer = buildDelegateMcpServer(ctx);
+  const wikiReader = buildWikiReaderMcpServer();
 
   const result = query({
     prompt: input.humanMessage,
     options: {
       systemPrompt: CEO_SYSTEM_PROMPT,
-      mcpServers: { "swarm-delegate": mcpServer },
+      mcpServers: {
+        "swarm-delegate": mcpServer,
+        "swarm-wiki-read": wikiReader,
+      },
       allowedTools: [
         "mcp__swarm-delegate__delegate_to_coder",
         "mcp__swarm-delegate__delegate_to_reviewer",
+        "mcp__swarm-delegate__delegate_to_librarian",
+        "mcp__swarm-wiki-read__read_wiki_page",
+        "mcp__swarm-wiki-read__list_wiki_pages",
+        "mcp__swarm-wiki-read__search_wiki",
       ],
       permissionMode: "default",
       resume,

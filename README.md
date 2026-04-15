@@ -87,6 +87,16 @@ swarm/
 └── data/                      # SQLite DB (gitignored)
 ```
 
+## Wiki (persistent memory)
+
+The swarm maintains an institutional-memory wiki at `swarm/wiki/` — its own git repo, LLM-maintained by the Librarian agent. See `swarm/wiki/CLAUDE.md` for the schema.
+
+- **Ingest a source:** DM the bot `/ingest <url-or-text>` or drop a markdown/text attachment with `/ingest` as the message body.
+- **Ask a wiki question:** talk to the CEO normally. It has read-only wiki tools.
+- **Browse:** open `swarm/wiki/` as an Obsidian vault.
+
+Configure the wiki location with `SWARM_WIKI_PATH` in `.env` (defaults to `./wiki`).
+
 ## Extending
 
 Add a new role (e.g. Researcher):

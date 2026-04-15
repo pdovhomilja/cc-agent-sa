@@ -2,12 +2,13 @@ import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { runCoder } from "../agents/coder.js";
 import { runReviewer } from "../agents/reviewer.js";
+import { runLibrarian } from "../agents/librarian.js";
 import { getMission, updateMissionStatus } from "../missions/store.js";
 import { getDiff } from "../missions/worktree.js";
 
 export interface DelegateContext {
   missionId: string;
-  onWorkerProgress: (role: "coder" | "reviewer", text: string) => void;
+  onWorkerProgress: (role: "coder" | "reviewer" | "librarian", text: string) => void;
 }
 
 export function buildDelegateMcpServer(ctx: DelegateContext) {
@@ -91,9 +92,35 @@ export function buildDelegateMcpServer(ctx: DelegateContext) {
     }
   );
 
+  const delegateToLibrarian = tool(
+    "delegate_to_librarian",
+    "Delegate a wiki task to the Librarian agent. Use for ingesting a source, updating knowledge, answering deep recall questions, or any task that modifies the wiki. Do NOT use for simple lookups — use read_wiki_page / search_wiki directly.",
+    {
+      task: z
+        .string()
+        .describe(
+          "Plain-language instructions for the Librarian. Include the source content or URL inline when ingesting."
+        ),
+    },
+    async (args) => {
+      const out = await runLibrarian({
+        task: args.task,
+        onProgress: (t) => ctx.onWorkerProgress("librarian", t),
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `## Librarian summary\n${out.summary}`,
+          },
+        ],
+      };
+    }
+  );
+
   return createSdkMcpServer({
     name: "swarm-delegate",
     version: "0.1.0",
-    tools: [delegateToCoder, delegateToReviewer],
+    tools: [delegateToCoder, delegateToReviewer, delegateToLibrarian],
   });
 }
