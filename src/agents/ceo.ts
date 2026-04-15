@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { CEO_SYSTEM_PROMPT } from "./prompts.js";
 import { buildDelegateMcpServer, type DelegateContext } from "../tools/delegate.js";
 import { buildWikiReaderMcpServer } from "../tools/wiki.js";
+import { buildPersonalToolsMcpServer } from "../tools/personal.js";
 import { getSession, saveSession } from "../missions/store.js";
 
 export interface CeoInput {
@@ -26,6 +27,7 @@ export async function runCeo(input: CeoInput): Promise<CeoOutput> {
 
   const mcpServer = buildDelegateMcpServer(ctx);
   const wikiReader = buildWikiReaderMcpServer();
+  const personal = buildPersonalToolsMcpServer("ceo", input.missionId);
 
   const result = query({
     prompt: input.humanMessage,
@@ -34,6 +36,7 @@ export async function runCeo(input: CeoInput): Promise<CeoOutput> {
       mcpServers: {
         "swarm-delegate": mcpServer,
         "swarm-wiki-read": wikiReader,
+        "swarm-personal-ceo": personal,
       },
       allowedTools: [
         "mcp__swarm-delegate__delegate_to_coder",
@@ -42,6 +45,11 @@ export async function runCeo(input: CeoInput): Promise<CeoOutput> {
         "mcp__swarm-wiki-read__read_wiki_page",
         "mcp__swarm-wiki-read__list_wiki_pages",
         "mcp__swarm-wiki-read__search_wiki",
+        "mcp__swarm-personal-ceo__read_scratchpad",
+        "mcp__swarm-personal-ceo__write_scratchpad",
+        "mcp__swarm-personal-ceo__append_scratchpad",
+        "mcp__swarm-personal-ceo__list_scratchpad",
+        "mcp__swarm-personal-ceo__submit_to_librarian",
       ],
       permissionMode: "default",
       resume,
