@@ -14,6 +14,7 @@ import { runCeo } from "../agents/ceo.js";
 import { runLibrarian } from "../agents/librarian.js";
 import { lintWiki, type LintReport } from "../tools/lint.js";
 import { searchWiki, readWikiPage } from "../tools/wiki-fs.js";
+import { extractPdfText } from "../tools/pdf.js";
 
 const inflight = new Set<string>();
 const activeDmMission = new Map<string, string>(); // dmChannelId → missionId
@@ -81,7 +82,8 @@ async function handleDm(msg: Message): Promise<void> {
 
   if (content === "/ingest" || content.startsWith("/ingest ")) {
     const payload = content.replace(/^\/ingest\s*/, "").trim();
-    const attachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+    const rawAttachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+    const attachments = await resolveAttachments(rawAttachments);
     if (!payload && attachments.length === 0) {
       await dm.send(
         "📥 `/ingest` usage: `/ingest <url>`, `/ingest <text>`, or send a markdown/text file with `/ingest` as the message."
@@ -261,9 +263,42 @@ async function sendLong(channel: { send: (content: string) => Promise<unknown> }
   for (const c of chunks) await channel.send(c);
 }
 
+interface ResolvedAttachment {
+  name: string | null;
+  url: string;
+  inlineText?: string;
+}
+
+async function resolveAttachments(
+  raw: Array<{ name: string | null; url: string }>
+): Promise<ResolvedAttachment[]> {
+  const resolved: ResolvedAttachment[] = [];
+  for (const a of raw) {
+    const isPdf = a.name?.toLowerCase().endsWith(".pdf") ?? false;
+    if (!isPdf) {
+      resolved.push({ name: a.name, url: a.url });
+      continue;
+    }
+    try {
+      const res = await fetch(a.url);
+      if (!res.ok) throw new Error(`fetch ${a.url} failed: ${res.status}`);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const text = await extractPdfText(buffer);
+      resolved.push({ name: a.name, url: a.url, inlineText: text });
+    } catch (err) {
+      resolved.push({
+        name: a.name,
+        url: a.url,
+        inlineText: `(PDF extraction failed: ${err instanceof Error ? err.message : String(err)})`,
+      });
+    }
+  }
+  return resolved;
+}
+
 function buildIngestTask(
   payload: string,
-  attachments: { name: string | null; url: string }[]
+  attachments: ResolvedAttachment[]
 ): string {
   const parts: string[] = [
     "A new source has been submitted for ingestion. Follow CLAUDE.md:",
@@ -280,7 +315,20 @@ function buildIngestTask(
   if (attachments.length > 0) {
     parts.push("", "## Attachments");
     for (const a of attachments) {
-      parts.push(`- ${a.name ?? "(unnamed)"}: ${a.url}`);
+      if (a.inlineText) {
+        parts.push(
+          `### ${a.name ?? "(unnamed)"}`,
+          `Source URL: ${a.url}`,
+          "",
+          "Extracted text:",
+          "```",
+          a.inlineText,
+          "```",
+          ""
+        );
+      } else {
+        parts.push(`- ${a.name ?? "(unnamed)"}: ${a.url}`);
+      }
     }
   }
   return parts.join("\n");
@@ -288,7 +336,8 @@ function buildIngestTask(
 
 async function handleIngestInChannel(msg: Message): Promise<void> {
   const payload = msg.content.replace(/^\/ingest\s*/, "").trim();
-  const attachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+  const rawAttachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+  const attachments = await resolveAttachments(rawAttachments);
   if (!payload && attachments.length === 0) {
     await msg.reply(
       "📥 `/ingest` usage: `/ingest <url>`, `/ingest <text>`, or send a markdown/text file with `/ingest` as the message."
