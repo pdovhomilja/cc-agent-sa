@@ -12,6 +12,7 @@ import { createMission, getMissionByThread } from "../missions/store.js";
 import { createWorktree } from "../missions/worktree.js";
 import { runCeo } from "../agents/ceo.js";
 import { runLibrarian } from "../agents/librarian.js";
+import { runAgent, getRegistry } from "../agents/runner.js";
 
 const inflight = new Set<string>();
 const activeDmMission = new Map<string, string>(); // dmChannelId → missionId
@@ -44,6 +45,17 @@ async function handleMessage(msg: Message): Promise<void> {
 
   if (msg.content === "/ingest" || msg.content.startsWith("/ingest ")) {
     await handleIngestInChannel(msg);
+    return;
+  }
+
+  const parentId =
+    chType === ChannelType.PublicThread
+      ? (msg.channel as ThreadChannel).parentId
+      : msg.channelId;
+
+  const department = parentId ? config.discord.departmentChannels.get(parentId) : undefined;
+  if (department) {
+    await handleDepartmentChannel(msg, department);
     return;
   }
 
@@ -265,5 +277,66 @@ async function handleIngestInChannel(msg: Message): Promise<void> {
     }
   } catch (err) {
     await msg.reply(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function handleDepartmentChannel(msg: Message, department: string): Promise<void> {
+  const agent = getRegistry().byDepartment(department);
+  if (!agent) {
+    await msg.reply(`No agent assigned to department "${department}".`);
+    return;
+  }
+
+  const chType = msg.channel.type;
+  let thread: ThreadChannel;
+  let missionId: string;
+
+  if (chType === ChannelType.PublicThread) {
+    thread = msg.channel as ThreadChannel;
+    const existing = getMissionByThread(thread.id);
+    if (!existing) {
+      await thread.send("No mission bound to this thread. Post in the parent channel to start a new one.");
+      return;
+    }
+    missionId = existing.id;
+  } else {
+    const parent = msg.channel as TextChannel;
+    thread = await parent.threads.create({
+      name: `${department}-${msg.id.slice(-6)}`,
+      startMessage: msg,
+      autoArchiveDuration: 1440,
+    });
+    missionId = randomUUID().slice(0, 8);
+    createMission({
+      id: missionId,
+      threadId: thread.id,
+      brief: msg.content,
+      status: "open",
+      worktreePath: `(n/a: ${department} mission)`,
+      branch: "(n/a)",
+    });
+    await thread.send(`**${department}** -> **${agent.id}** — mission \`${missionId}\` started.`);
+  }
+
+  const tag = `[\`${missionId}\`]`;
+  if (inflight.has(missionId)) {
+    await thread.send(`${agent.id} is already working on this mission.`);
+    return;
+  }
+  inflight.add(missionId);
+
+  try {
+    const out = await runAgent({
+      agentId: agent.id,
+      missionId,
+      task: msg.content,
+      onProgress: (t) => {
+        const snippet = t.slice(0, 1500);
+        thread.send(`${tag} **${agent.id}**: ${snippet}`).catch(() => {});
+      },
+    });
+    await sendLong(thread, `**${agent.id}:** ${out.summary}`);
+  } finally {
+    inflight.delete(missionId);
   }
 }
