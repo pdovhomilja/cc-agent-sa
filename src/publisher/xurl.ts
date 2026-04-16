@@ -35,6 +35,7 @@ export async function postToX(
   }
 
   const argv = [
+    "--auth", "oauth2",
     "-X", "POST",
     "-H", "content-type: application/json",
     "-d", JSON.stringify({ text }),

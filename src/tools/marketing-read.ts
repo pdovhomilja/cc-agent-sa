@@ -27,7 +27,7 @@ export function buildMarketingReadMcpServer() {
       if (!isAllowed(args.endpoint)) {
         throw new Error(`xurl_get: endpoint not in allowlist: ${args.endpoint}`);
       }
-      const res = await execFileP(config.swarm.xurlPath, [args.endpoint], {
+      const res = await execFileP(config.swarm.xurlPath, ["--auth", "oauth2", args.endpoint], {
         timeout: 15_000,
       });
       return {

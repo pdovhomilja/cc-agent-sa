@@ -28,6 +28,7 @@ describe("postToX", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       XURL_PATH,
       [
+        "--auth", "oauth2",
         "-X", "POST",
         "-H", "content-type: application/json",
         "-d", JSON.stringify({ text: "Hello world" }),
