@@ -109,17 +109,143 @@ Environment variables:
 - `SWARM_SCRATCHPAD_ROOT` — scratchpad location (default `./scratchpads`).
 - `SWARM_LIBRARIAN_TIMEOUT_MS` — max duration of a single Librarian session (default 600000 = 10 min).
 
-## Extending
+## Agent Workspaces (Hire-by-Copy)
 
-Add a new role (e.g. Researcher):
+Beyond the hard-coded CEO/Coder/Reviewer pipeline, the swarm supports **workspace-based agents** that you create by "hiring" — copying a role file from a skill library and customizing its procedures. No TypeScript needed.
+
+### How it works
+
+Each agent is a directory under `agents/<id>/`:
+
+```
+agents/x-researcher/
+├── role.md           # identity (copied from agency-agents library)
+├── agent.json        # config: department, model, tools
+├── CLAUDE.md         # swarm-specific procedures you edit
+├── memory/           # persistent cross-mission notes
+│   └── MEMORY.md
+└── scratchpad/       # per-mission working notes
+```
+
+A generic `runAgent()` function loads the workspace, composes a layered system prompt (role.md + shared skills + CLAUDE.md + Karpathy rules), mounts MCP tools based on `agent.json`, and runs the Claude session.
+
+### Hiring a new agent
+
+```bash
+pnpm hire <agent-id> \
+  --role <path-to-role-md> \
+  --department <department> \
+  --tools <comma-separated-native-tools> \
+  [--model <model>]
+```
+
+Example — hire a LinkedIn content writer:
+
+```bash
+pnpm hire linkedin-writer \
+  --role ../agency-agents/marketing/marketing-linkedin-content-creator.md \
+  --department research \
+  --tools Read,Write,Edit,Glob,Grep
+```
+
+This creates `agents/linkedin-writer/` with:
+- `role.md` copied from the source file
+- `agent.json` with your specified config
+- A starter `CLAUDE.md` you should edit with department-specific procedures
+
+### Customizing an agent
+
+**Tune behavior:** edit `agents/<id>/CLAUDE.md` — this is the procedures layer. Add rules like "always check drafts/README.md first" or "maximum 280 characters for X posts."
+
+**Tune identity:** edit `agents/<id>/role.md` — this is the personality/expertise layer. Add your brand voice, remove capabilities you don't want.
+
+**Change tools:** edit `agents/<id>/agent.json`:
+- `nativeTools` — which file tools the agent gets: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`
+- `mcpTools` — which MCP tools to mount: `fetch_url`, `submit_to_librarian`, `xurl_get`, `propose_publish`
+- `model` — which Claude model to use
+- `department` — which Discord channel routes to this agent
+
+### Connecting to Discord
+
+Set `DISCORD_DEPARTMENT_CHANNELS` in `.env` as comma-separated `channelId:department` pairs:
+
+```env
+DISCORD_DEPARTMENT_CHANNELS=123456789:research,987654321:marketing
+```
+
+Messages in those channels route to the first agent registered in that department. The agent gets a thread per mission with session resume support.
+
+### Content pipeline (Research + Marketing)
+
+Two pre-hired agents demonstrate the full content pipeline:
+
+1. **`#research` channel** — `x-researcher` drafts X/LinkedIn posts into `wiki/drafts/`
+2. **`#marketing` channel** — `x-marketer` reviews drafts, calls `propose_publish`
+3. **Approval marker** appears in `#marketing` with the post text
+4. **React ✅** on the marker → Publisher module runs `xurl --auth oauth2` → tweet goes live
+5. **React ❌** → draft marked as rejected
+
+Drafts live in `wiki/drafts/` as Markdown with YAML frontmatter. Status lifecycle: `draft → ready-for-review → awaiting-approval → published → measured`.
+
+Required env vars for the content pipeline:
+
+| var | purpose |
+|---|---|
+| `DISCORD_DEPARTMENT_CHANNELS` | Comma-separated `channelId:department` pairs |
+| `XURL_PATH` | Path to `xurl` CLI binary (default: `xurl`) |
+
+### Shared skills
+
+Files in `skills/shared/*.md` are loaded into every workspace agent's system prompt. Use them for company-wide conventions (wiki structure, drafts lifecycle, etc.).
+
+### Layout (new files)
+
+```
+swarm/
+├── agents/                       # agent workspaces (one dir per agent)
+│   ├── x-researcher/             # research agent
+│   └── x-marketer/               # marketing agent
+├── skills/
+│   └── shared/
+│       └── wiki-conventions.md   # loaded into all agents
+├── src/
+│   ├── agents/
+│   │   ├── agent-config.ts       # AgentConfig type + validator
+│   │   ├── registry.ts           # loads agents/*/agent.json
+│   │   ├── compose-prompt.ts     # layered prompt assembly
+│   │   ├── runner.ts             # generic runAgent()
+│   │   └── hire.ts               # pnpm hire CLI
+│   ├── tools/
+│   │   ├── drafts-fs.ts          # draft frontmatter + state machine
+│   │   ├── marketing-read.ts     # xurl_get MCP (read-only Twitter)
+│   │   └── propose-publish.ts    # propose_publish MCP
+│   └── publisher/
+│       ├── xurl.ts               # postToX via xurl CLI
+│       ├── approval-store.ts     # SQLite: pending approvals
+│       └── approval.ts           # Discord reaction handler
+```
+
+## Extending (code agents)
+
+Add a new role to the CEO pipeline (e.g. Researcher):
 1. Add `RESEARCHER_SYSTEM_PROMPT` in `src/agents/prompts.ts`.
 2. Create `src/agents/researcher.ts` mirroring `reviewer.ts`.
 3. Add a `delegate_to_researcher` tool in `src/tools/delegate.ts`.
 4. Whitelist it in `allowedTools` inside `src/agents/ceo.ts`.
 
+## Extending (workspace agents)
+
+Add a new non-code agent — **no TypeScript needed:**
+1. `pnpm hire <name> --role <file> --department <dept> --tools <tools>`
+2. Edit `agents/<name>/CLAUDE.md` with procedures
+3. Add a Discord channel and map it in `DISCORD_DEPARTMENT_CHANNELS`
+4. Restart the bot
+
 ## Notes & caveats
 
-- **Merging is manual on purpose.** The bot never pushes or merges without you. When CEO signals approval, `cd` into `SWARM_REPO_PATH` and `git merge swarm/<mission-id>` yourself, or wire an approval reaction handler later.
-- **Bash is allowlisted loosely.** Tighten `allowedTools` in `coder.ts` with an explicit command allowlist before pointing this at anything important.
-- **Mission timeout** is not yet enforced in code — add a `setTimeout`/`AbortController` around `runCeo` when you need it.
-- Diagnostics about missing modules will disappear after `npm install`.
+- **Merging is manual on purpose.** The bot never pushes or merges without you.
+- **Publishing requires human approval.** Agents cannot post to X/LinkedIn — only `propose_publish` + your ✅ reaction triggers the Publisher.
+- **Bash is allowlisted loosely.** Tighten `allowedTools` in `coder.ts` before pointing this at anything important.
+- **LinkedIn publishing** is not yet implemented (X only via `xurl`).
+- **One agent per department** currently. For multi-agent departments, add `@agent` prefix routing.
+- **Mission timeout** is not yet enforced — add `AbortController` around `runAgent` when needed.
