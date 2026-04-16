@@ -97,11 +97,17 @@ The swarm maintains an institutional-memory wiki at `swarm/wiki/` — its own gi
 - **Automatic mission capture:** when a reviewer approves a mission, a background Librarian session files it into `wiki/missions/<id>.md` and updates any affected entity/concept/project pages. Runs non-blocking; failures are logged to `wiki/inbox/_errors/`.
 - **Agent scratchpads:** each agent (CEO, Coder, Reviewer) has its own private notes dir under `swarm/scratchpads/<role>/`. Agents use them for in-flight reasoning and lessons they don't want to forget.
 - **Cross-agent notes:** any agent can call `submit_to_librarian` with a durable finding. The Librarian picks it up from `wiki/inbox/` on its next task.
+- **Wiki commands in Discord:**
+  - `/lint` — structural health check (orphans, broken links, empty pages, missing front-matter).
+  - `/wiki <query>` — search the wiki; returns top 10 hits with snippets.
+  - `/recent [N]` — last N entries from the wiki log (default 20, max 200).
+- **PDF ingestion:** attach a `.pdf` file with `/ingest` as the message body — the bot extracts text locally and hands it to the Librarian.
 
 Environment variables:
 
 - `SWARM_WIKI_PATH` — wiki location (default `./wiki`).
 - `SWARM_SCRATCHPAD_ROOT` — scratchpad location (default `./scratchpads`).
+- `SWARM_LIBRARIAN_TIMEOUT_MS` — max duration of a single Librarian session (default 600000 = 10 min).
 
 ## Extending
 

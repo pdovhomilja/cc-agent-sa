@@ -12,6 +12,9 @@ import { createMission, getMissionByThread } from "../missions/store.js";
 import { createWorktree } from "../missions/worktree.js";
 import { runCeo } from "../agents/ceo.js";
 import { runLibrarian } from "../agents/librarian.js";
+import { lintWiki, type LintReport } from "../tools/lint.js";
+import { searchWiki, readWikiPage } from "../tools/wiki-fs.js";
+import { extractPdfText } from "../tools/pdf.js";
 
 const inflight = new Set<string>();
 const activeDmMission = new Map<string, string>(); // dmChannelId → missionId
@@ -47,6 +50,17 @@ async function handleMessage(msg: Message): Promise<void> {
     return;
   }
 
+  if (
+    msg.content === "/lint" ||
+    msg.content.startsWith("/wiki ") ||
+    msg.content === "/wiki" ||
+    msg.content === "/recent" ||
+    msg.content.startsWith("/recent ")
+  ) {
+    await handleWikiQueryInChannel(msg);
+    return;
+  }
+
   const inCeoChannel = msg.channelId === config.discord.ceoChannelId;
   const inMissionThread =
     chType === ChannelType.PublicThread &&
@@ -68,7 +82,8 @@ async function handleDm(msg: Message): Promise<void> {
 
   if (content === "/ingest" || content.startsWith("/ingest ")) {
     const payload = content.replace(/^\/ingest\s*/, "").trim();
-    const attachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+    const rawAttachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+    const attachments = await resolveAttachments(rawAttachments);
     if (!payload && attachments.length === 0) {
       await dm.send(
         "📥 `/ingest` usage: `/ingest <url>`, `/ingest <text>`, or send a markdown/text file with `/ingest` as the message."
@@ -88,6 +103,43 @@ async function handleDm(msg: Message): Promise<void> {
       await sendLong(dm, `📚 **Librarian done:** ${out.summary}`);
     } catch (err) {
       await dm.send(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  if (content === "/lint") {
+    try {
+      const report = lintWiki(config.swarm.wikiPath);
+      await sendLong(dm, formatLintReport(report));
+    } catch (err) {
+      await dm.send(`❌ Lint failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  if (content.startsWith("/wiki ") || content === "/wiki") {
+    const query = content.replace(/^\/wiki\s*/, "").trim();
+    if (!query) {
+      await dm.send("📖 `/wiki <query>` — usage: `/wiki acme corp`");
+      return;
+    }
+    try {
+      const hits = searchWiki(config.swarm.wikiPath, query);
+      await sendLong(dm, formatSearchHits(query, hits));
+    } catch (err) {
+      await dm.send(`❌ Wiki search failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  if (content === "/recent" || content.startsWith("/recent ")) {
+    const arg = content.replace(/^\/recent\s*/, "").trim();
+    const n = arg ? Math.min(200, Math.max(1, parseInt(arg, 10) || 20)) : 20;
+    try {
+      const log = readWikiPage(config.swarm.wikiPath, "log.md");
+      await sendLong(dm, formatRecent(log, n));
+    } catch (err) {
+      await dm.send(`❌ No log found — wiki not initialized? (${err instanceof Error ? err.message : String(err)})`);
     }
     return;
   }
@@ -211,9 +263,38 @@ async function sendLong(channel: { send: (content: string) => Promise<unknown> }
   for (const c of chunks) await channel.send(c);
 }
 
+interface ResolvedAttachment {
+  name: string | null;
+  url: string;
+  inlineText?: string;
+}
+
+async function resolveAttachments(
+  raw: Array<{ name: string | null; url: string }>
+): Promise<ResolvedAttachment[]> {
+  const resolved: ResolvedAttachment[] = [];
+  for (const a of raw) {
+    const isPdf = a.name?.toLowerCase().endsWith(".pdf") ?? false;
+    if (!isPdf) {
+      resolved.push({ name: a.name, url: a.url });
+      continue;
+    }
+    try {
+      const res = await fetch(a.url);
+      if (!res.ok) throw new Error(`fetch ${a.url} failed: ${res.status}`);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const text = await extractPdfText(buffer);
+      resolved.push({ name: a.name, url: a.url, inlineText: text });
+    } catch (err) {
+      console.error(`[ingest] PDF extraction failed for ${a.name}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return resolved;
+}
+
 function buildIngestTask(
   payload: string,
-  attachments: { name: string | null; url: string }[]
+  attachments: ResolvedAttachment[]
 ): string {
   const parts: string[] = [
     "A new source has been submitted for ingestion. Follow CLAUDE.md:",
@@ -230,7 +311,20 @@ function buildIngestTask(
   if (attachments.length > 0) {
     parts.push("", "## Attachments");
     for (const a of attachments) {
-      parts.push(`- ${a.name ?? "(unnamed)"}: ${a.url}`);
+      if (a.inlineText) {
+        parts.push(
+          `### ${a.name ?? "(unnamed)"}`,
+          `Source URL: ${a.url}`,
+          "",
+          "Extracted text:",
+          "```",
+          a.inlineText,
+          "```",
+          ""
+        );
+      } else {
+        parts.push(`- ${a.name ?? "(unnamed)"}: ${a.url}`);
+      }
     }
   }
   return parts.join("\n");
@@ -238,7 +332,8 @@ function buildIngestTask(
 
 async function handleIngestInChannel(msg: Message): Promise<void> {
   const payload = msg.content.replace(/^\/ingest\s*/, "").trim();
-  const attachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+  const rawAttachments = msg.attachments.map((a) => ({ name: a.name, url: a.url }));
+  const attachments = await resolveAttachments(rawAttachments);
   if (!payload && attachments.length === 0) {
     await msg.reply(
       "📥 `/ingest` usage: `/ingest <url>`, `/ingest <text>`, or send a markdown/text file with `/ingest` as the message."
@@ -265,5 +360,108 @@ async function handleIngestInChannel(msg: Message): Promise<void> {
     }
   } catch (err) {
     await msg.reply(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function formatLintReport(report: LintReport): string {
+  const lines: string[] = [
+    "## 🧹 Wiki lint report",
+    "",
+    `- orphans: **${report.orphans.length}**`,
+    `- broken links: **${report.brokenLinks.length}**`,
+    `- empty pages: **${report.emptyPages.length}**`,
+    `- missing front-matter: **${report.missingFrontMatter.length}**`,
+    "",
+  ];
+  if (report.orphans.length > 0) {
+    lines.push("### Orphans");
+    for (const p of report.orphans.slice(0, 10)) lines.push(`- \`${p}\``);
+    if (report.orphans.length > 10) lines.push(`  _…and ${report.orphans.length - 10} more_`);
+    lines.push("");
+  }
+  if (report.brokenLinks.length > 0) {
+    lines.push("### Broken links");
+    for (const { from, to } of report.brokenLinks.slice(0, 10)) {
+      lines.push(`- \`${from}\` → \`${to}\``);
+    }
+    if (report.brokenLinks.length > 10) {
+      lines.push(`  _…and ${report.brokenLinks.length - 10} more_`);
+    }
+    lines.push("");
+  }
+  if (report.emptyPages.length > 0) {
+    lines.push("### Empty pages");
+    for (const p of report.emptyPages.slice(0, 10)) lines.push(`- \`${p}\``);
+    if (report.emptyPages.length > 10) lines.push(`  _…and ${report.emptyPages.length - 10} more_`);
+    lines.push("");
+  }
+  if (report.missingFrontMatter.length > 0) {
+    lines.push("### Missing front-matter");
+    for (const p of report.missingFrontMatter.slice(0, 10)) lines.push(`- \`${p}\``);
+    if (report.missingFrontMatter.length > 10) {
+      lines.push(`  _…and ${report.missingFrontMatter.length - 10} more_`);
+    }
+    lines.push("");
+  }
+  if (
+    report.orphans.length === 0 &&
+    report.brokenLinks.length === 0 &&
+    report.emptyPages.length === 0 &&
+    report.missingFrontMatter.length === 0
+  ) {
+    lines.push("✨ clean");
+  }
+  return lines.join("\n");
+}
+
+function formatSearchHits(
+  query: string,
+  hits: Array<{ path: string; snippet: string }>
+): string {
+  if (hits.length === 0) return `🔎 \`${query}\` — no matches`;
+  const capped = hits.slice(0, 10);
+  const lines: string[] = [`🔎 \`${query}\` — ${hits.length} hit${hits.length === 1 ? "" : "s"}`, ""];
+  for (const h of capped) {
+    lines.push(`- **\`${h.path}\`**: ${h.snippet}`);
+  }
+  if (hits.length > 10) lines.push(`_…and ${hits.length - 10} more_`);
+  return lines.join("\n");
+}
+
+function formatRecent(log: string, n: number): string {
+  const allLines = log.split("\n").filter((l) => l.trim().length > 0 && l !== "---");
+  const bodyLines = allLines.filter((l) => !l.startsWith("#"));
+  const tail = bodyLines.slice(-n);
+  if (tail.length === 0) return "📜 log is empty";
+  return ["📜 last " + tail.length + " entries", "```", ...tail, "```"].join("\n");
+}
+
+async function handleWikiQueryInChannel(msg: Message): Promise<void> {
+  const content = msg.content;
+  try {
+    if (content === "/lint") {
+      const report = lintWiki(config.swarm.wikiPath);
+      await msg.reply(formatLintReport(report));
+      return;
+    }
+    if (content.startsWith("/wiki ") || content === "/wiki") {
+      const query = content.replace(/^\/wiki\s*/, "").trim();
+      if (!query) {
+        await msg.reply("📖 `/wiki <query>` — usage: `/wiki acme corp`");
+        return;
+      }
+      const hits = searchWiki(config.swarm.wikiPath, query);
+      await msg.reply(formatSearchHits(query, hits));
+      return;
+    }
+    if (content === "/recent" || content.startsWith("/recent ")) {
+      const arg = content.replace(/^\/recent\s*/, "").trim();
+      const n = arg ? Math.min(200, Math.max(1, parseInt(arg, 10) || 20)) : 20;
+      const log = readWikiPage(config.swarm.wikiPath, "log.md");
+      await msg.reply(formatRecent(log, n));
+      return;
+    }
+  } catch (err) {
+    await msg.reply(`❌ ${err instanceof Error ? err.message : String(err)}`);
   }
 }
