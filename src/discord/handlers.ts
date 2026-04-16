@@ -12,6 +12,8 @@ import { createMission, getMissionByThread } from "../missions/store.js";
 import { createWorktree } from "../missions/worktree.js";
 import { runCeo } from "../agents/ceo.js";
 import { runLibrarian } from "../agents/librarian.js";
+import { lintWiki, type LintReport } from "../tools/lint.js";
+import { searchWiki, readWikiPage } from "../tools/wiki-fs.js";
 
 const inflight = new Set<string>();
 const activeDmMission = new Map<string, string>(); // dmChannelId → missionId
@@ -44,6 +46,17 @@ async function handleMessage(msg: Message): Promise<void> {
 
   if (msg.content === "/ingest" || msg.content.startsWith("/ingest ")) {
     await handleIngestInChannel(msg);
+    return;
+  }
+
+  if (
+    msg.content === "/lint" ||
+    msg.content.startsWith("/wiki ") ||
+    msg.content === "/wiki" ||
+    msg.content === "/recent" ||
+    msg.content.startsWith("/recent ")
+  ) {
+    await handleWikiQueryInChannel(msg);
     return;
   }
 
@@ -88,6 +101,43 @@ async function handleDm(msg: Message): Promise<void> {
       await sendLong(dm, `📚 **Librarian done:** ${out.summary}`);
     } catch (err) {
       await dm.send(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  if (content === "/lint") {
+    try {
+      const report = lintWiki(config.swarm.wikiPath);
+      await sendLong(dm, formatLintReport(report));
+    } catch (err) {
+      await dm.send(`❌ Lint failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  if (content.startsWith("/wiki ") || content === "/wiki") {
+    const query = content.replace(/^\/wiki\s*/, "").trim();
+    if (!query) {
+      await dm.send("📖 `/wiki <query>` — usage: `/wiki acme corp`");
+      return;
+    }
+    try {
+      const hits = searchWiki(config.swarm.wikiPath, query);
+      await sendLong(dm, formatSearchHits(query, hits));
+    } catch (err) {
+      await dm.send(`❌ Wiki search failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
+
+  if (content === "/recent" || content.startsWith("/recent ")) {
+    const arg = content.replace(/^\/recent\s*/, "").trim();
+    const n = arg ? Math.min(200, Math.max(1, parseInt(arg, 10) || 20)) : 20;
+    try {
+      const log = readWikiPage(config.swarm.wikiPath, "log.md");
+      await sendLong(dm, formatRecent(log, n));
+    } catch (err) {
+      await dm.send(`❌ No log found — wiki not initialized? (${err instanceof Error ? err.message : String(err)})`);
     }
     return;
   }
@@ -265,5 +315,108 @@ async function handleIngestInChannel(msg: Message): Promise<void> {
     }
   } catch (err) {
     await msg.reply(`❌ Librarian failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function formatLintReport(report: LintReport): string {
+  const lines: string[] = [
+    "## 🧹 Wiki lint report",
+    "",
+    `- orphans: **${report.orphans.length}**`,
+    `- broken links: **${report.brokenLinks.length}**`,
+    `- empty pages: **${report.emptyPages.length}**`,
+    `- missing front-matter: **${report.missingFrontMatter.length}**`,
+    "",
+  ];
+  if (report.orphans.length > 0) {
+    lines.push("### Orphans");
+    for (const p of report.orphans.slice(0, 10)) lines.push(`- \`${p}\``);
+    if (report.orphans.length > 10) lines.push(`  _…and ${report.orphans.length - 10} more_`);
+    lines.push("");
+  }
+  if (report.brokenLinks.length > 0) {
+    lines.push("### Broken links");
+    for (const { from, to } of report.brokenLinks.slice(0, 10)) {
+      lines.push(`- \`${from}\` → \`${to}\``);
+    }
+    if (report.brokenLinks.length > 10) {
+      lines.push(`  _…and ${report.brokenLinks.length - 10} more_`);
+    }
+    lines.push("");
+  }
+  if (report.emptyPages.length > 0) {
+    lines.push("### Empty pages");
+    for (const p of report.emptyPages.slice(0, 10)) lines.push(`- \`${p}\``);
+    if (report.emptyPages.length > 10) lines.push(`  _…and ${report.emptyPages.length - 10} more_`);
+    lines.push("");
+  }
+  if (report.missingFrontMatter.length > 0) {
+    lines.push("### Missing front-matter");
+    for (const p of report.missingFrontMatter.slice(0, 10)) lines.push(`- \`${p}\``);
+    if (report.missingFrontMatter.length > 10) {
+      lines.push(`  _…and ${report.missingFrontMatter.length - 10} more_`);
+    }
+    lines.push("");
+  }
+  if (
+    report.orphans.length === 0 &&
+    report.brokenLinks.length === 0 &&
+    report.emptyPages.length === 0 &&
+    report.missingFrontMatter.length === 0
+  ) {
+    lines.push("✨ clean");
+  }
+  return lines.join("\n");
+}
+
+function formatSearchHits(
+  query: string,
+  hits: Array<{ path: string; snippet: string }>
+): string {
+  if (hits.length === 0) return `🔎 \`${query}\` — no matches`;
+  const capped = hits.slice(0, 10);
+  const lines: string[] = [`🔎 \`${query}\` — ${hits.length} hit${hits.length === 1 ? "" : "s"}`, ""];
+  for (const h of capped) {
+    lines.push(`- **\`${h.path}\`**: ${h.snippet}`);
+  }
+  if (hits.length > 10) lines.push(`_…and ${hits.length - 10} more_`);
+  return lines.join("\n");
+}
+
+function formatRecent(log: string, n: number): string {
+  const allLines = log.split("\n").filter((l) => l.trim().length > 0 && l !== "---");
+  const bodyLines = allLines.filter((l) => !l.startsWith("#"));
+  const tail = bodyLines.slice(-n);
+  if (tail.length === 0) return "📜 log is empty";
+  return ["📜 last " + tail.length + " entries", "```", ...tail, "```"].join("\n");
+}
+
+async function handleWikiQueryInChannel(msg: Message): Promise<void> {
+  const content = msg.content;
+  try {
+    if (content === "/lint") {
+      const report = lintWiki(config.swarm.wikiPath);
+      await msg.reply(formatLintReport(report));
+      return;
+    }
+    if (content.startsWith("/wiki ") || content === "/wiki") {
+      const query = content.replace(/^\/wiki\s*/, "").trim();
+      if (!query) {
+        await msg.reply("📖 `/wiki <query>` — usage: `/wiki acme corp`");
+        return;
+      }
+      const hits = searchWiki(config.swarm.wikiPath, query);
+      await msg.reply(formatSearchHits(query, hits));
+      return;
+    }
+    if (content === "/recent" || content.startsWith("/recent ")) {
+      const arg = content.replace(/^\/recent\s*/, "").trim();
+      const n = arg ? Math.min(200, Math.max(1, parseInt(arg, 10) || 20)) : 20;
+      const log = readWikiPage(config.swarm.wikiPath, "log.md");
+      await msg.reply(formatRecent(log, n));
+      return;
+    }
+  } catch (err) {
+    await msg.reply(`❌ ${err instanceof Error ? err.message : String(err)}`);
   }
 }
