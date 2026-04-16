@@ -17,6 +17,28 @@ import { runAgent, getRegistry } from "../agents/runner.js";
 const inflight = new Set<string>();
 const activeDmMission = new Map<string, string>(); // dmChannelId → missionId
 
+async function buildExtraMcp(agentConfig: { mcpTools: string[] }): Promise<{
+  servers: Record<string, unknown>;
+  tools: string[];
+}> {
+  const servers: Record<string, unknown> = {};
+  const tools: string[] = [];
+
+  if (agentConfig.mcpTools.includes("xurl_get")) {
+    const { buildMarketingReadMcpServer } = await import("../tools/marketing-read.js");
+    servers["swarm-marketing-read"] = buildMarketingReadMcpServer();
+    tools.push("mcp__swarm-marketing-read__xurl_get");
+  }
+
+  if (agentConfig.mcpTools.includes("propose_publish")) {
+    const { buildProposePublishMcpServer } = await import("../tools/propose-publish.js");
+    servers["swarm-marketing-propose"] = buildProposePublishMcpServer();
+    tools.push("mcp__swarm-marketing-propose__propose_publish");
+  }
+
+  return { servers, tools };
+}
+
 export function registerHandlers(): void {
   discord.on("messageCreate", (msg) => {
     handleMessage(msg).catch((err) => {
@@ -325,6 +347,8 @@ async function handleDepartmentChannel(msg: Message, department: string): Promis
   }
   inflight.add(missionId);
 
+  const extras = await buildExtraMcp(agent.config);
+
   try {
     const out = await runAgent({
       agentId: agent.id,
@@ -334,6 +358,8 @@ async function handleDepartmentChannel(msg: Message, department: string): Promis
         const snippet = t.slice(0, 1500);
         thread.send(`${tag} **${agent.id}**: ${snippet}`).catch(() => {});
       },
+      extraMcpServers: extras.servers,
+      extraAllowedTools: extras.tools,
     });
     await sendLong(thread, `**${agent.id}:** ${out.summary}`);
   } finally {
