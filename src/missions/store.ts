@@ -18,7 +18,7 @@ export interface Mission {
 
 export interface AgentSession {
   missionId: string;
-  role: "ceo" | "coder" | "reviewer";
+  role: string;
   sessionId: string;
   updatedAt: number;
 }
@@ -89,7 +89,7 @@ export function saveSession(s: Omit<AgentSession, "updatedAt">): void {
   ).run(s.missionId, s.role, s.sessionId, Date.now());
 }
 
-export function getSession(missionId: string, role: AgentSession["role"]): string | undefined {
+export function getSession(missionId: string, role: string): string | undefined {
   const row = db.prepare(`SELECT session_id FROM agent_sessions WHERE mission_id = ? AND role = ?`).get(missionId, role) as any;
   return row?.session_id;
 }

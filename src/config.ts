@@ -1,6 +1,16 @@
 import "dotenv/config";
 import path from "node:path";
 
+function parseDepartmentChannels(raw?: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!raw) return map;
+  for (const pair of raw.split(",")) {
+    const [channelId, dept] = pair.split(":").map((s) => s.trim());
+    if (channelId && dept) map.set(channelId, dept);
+  }
+  return map;
+}
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing required env var: ${name}`);
@@ -26,6 +36,9 @@ const allowedUserIds = envOnce(() =>
     .map((s) => s.trim())
     .filter(Boolean)
 );
+const departmentChannels = envOnce(() =>
+  parseDepartmentChannels(process.env.DISCORD_DEPARTMENT_CHANNELS)
+);
 const anthropicApiKey = envOnce(() => required("ANTHROPIC_API_KEY"));
 const repoPath = envOnce(() => path.resolve(required("SWARM_REPO_PATH")));
 const worktreeRoot = envOnce(() =>
@@ -46,6 +59,7 @@ const missionTimeoutMs = envOnce(() =>
 const librarianTimeoutMs = envOnce(() =>
   Number(process.env.SWARM_LIBRARIAN_TIMEOUT_MS ?? 10 * 60 * 1000)
 );
+const xurlPath = envOnce(() => process.env.XURL_PATH ?? "xurl");
 
 export const config = {
   discord: {
@@ -60,6 +74,9 @@ export const config = {
     },
     get allowedUserIds() {
       return allowedUserIds();
+    },
+    get departmentChannels() {
+      return departmentChannels();
     },
   },
   anthropic: {
@@ -88,6 +105,9 @@ export const config = {
     },
     get librarianTimeoutMs() {
       return librarianTimeoutMs();
+    },
+    get xurlPath() {
+      return xurlPath();
     },
   },
 };
