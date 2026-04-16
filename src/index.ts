@@ -1,5 +1,7 @@
 import { startDiscord, discord } from "./discord/client.js";
 import { registerHandlers } from "./discord/handlers.js";
+import { registerApprovalHandler } from "./publisher/approval.js";
+import { initApprovalStore } from "./publisher/approval-store.js";
 
 process.on("uncaughtException", (err) => {
   console.error("[swarm] uncaughtException:", err);
@@ -15,7 +17,9 @@ discord.on("shardReconnecting", (id) => console.log(`[discord] shard ${id} recon
 discord.on("shardResume", (id) => console.log(`[discord] shard ${id} resumed`));
 
 async function main(): Promise<void> {
+  await initApprovalStore();
   registerHandlers();
+  registerApprovalHandler(discord);
   await startDiscord();
   console.log("[swarm] ready — waiting for missions in the CEO channel");
 }
