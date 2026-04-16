@@ -1,0 +1,18 @@
+{
+  "id": "x-marketer",
+  "department": "marketing",
+  "model": "claude-sonnet-4-6",
+  "nativeTools": [
+    "Read",
+    "Edit",
+    "Glob",
+    "Grep"
+  ],
+  "mcpTools": [
+    "fetch_url",
+    "submit_to_librarian",
+    "xurl_get",
+    "propose_publish"
+  ],
+  "created": "2026-04-16T00:00:00Z"
+}
