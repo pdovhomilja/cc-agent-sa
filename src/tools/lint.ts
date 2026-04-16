@@ -21,6 +21,7 @@ function stripFrontMatter(content: string): string {
   return content.replace(FRONT_MATTER_REGEX, "");
 }
 
+// Does not strip fenced code blocks — [[links]] inside ``` will cause false-positive broken-link reports.
 function extractLinks(content: string): string[] {
   const links: string[] = [];
   const body = stripFrontMatter(content);

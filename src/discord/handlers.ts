@@ -286,11 +286,7 @@ async function resolveAttachments(
       const text = await extractPdfText(buffer);
       resolved.push({ name: a.name, url: a.url, inlineText: text });
     } catch (err) {
-      resolved.push({
-        name: a.name,
-        url: a.url,
-        inlineText: `(PDF extraction failed: ${err instanceof Error ? err.message : String(err)})`,
-      });
+      console.error(`[ingest] PDF extraction failed for ${a.name}:`, err instanceof Error ? err.message : err);
     }
   }
   return resolved;
