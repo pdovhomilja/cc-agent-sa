@@ -1,133 +1,112 @@
 # swarm
 
-A Discord-driven AI agent swarm built on the Claude Agent SDK. A **CEO** orchestrator talks to you in Discord, breaks goals into missions, and delegates implementation to a **Coder** and quality review to a **Reviewer**. Each mission runs in an isolated git worktree.
+A Discord-driven AI agent swarm built on the Claude Agent SDK. Two systems coexist:
+
+1. **Engineering pipeline** — a **CEO** orchestrator delegates coding missions to a **Coder** and quality review to a **Reviewer**, each running in an isolated git worktree.
+2. **Workspace agents** — hire-by-copy agents (Research, Marketing, and any future role) that operate on the wiki using native tools, with behavior defined in markdown skill files. No TypeScript needed to add new agents.
+
+Both systems share a persistent **wiki** (Karpathy-style LLM-maintained knowledge base) managed by a **Librarian** agent.
 
 ## Architecture
 
 ```
-Discord #ceo channel (human)
-        │
-        ▼  (thread-per-mission)
-    ┌───────┐   delegate_to_coder     ┌────────┐
-    │  CEO  │ ──────────────────────▶ │ Coder  │ ── edits ──▶ worktree
-    │       │                         └────────┘
-    │       │   delegate_to_reviewer  ┌──────────┐
-    │       │ ──────────────────────▶ │ Reviewer │ ── reads ──▶ worktree
-    └───────┘                         └──────────┘
-        │
-        ▼  summary + approval request
-Discord #ceo thread (human)
+                          Discord
+                            │
+         ┌──────────────────┼───────────────────┐
+         │                  │                    │
+    #ceo channel      #research channel    #marketing channel
+         │                  │                    │
+         ▼                  ▼                    ▼
+    ┌─────────┐       ┌────────────┐       ┌────────────┐
+    │   CEO   │       │x-researcher│       │ x-marketer │
+    │(orchestr)│       │ (workspace)│       │ (workspace)│
+    └────┬────┘       └─────┬──────┘       └─────┬──────┘
+         │                  │                    │
+    ┌────┴────┐        wiki/drafts/         propose_publish
+    │  Coder  │         (native tools)       → ✅ reaction
+    │Reviewer │                              → xurl → X post
+    └─────────┘
+         │
+    git worktree
 ```
 
-- **CEO** has no file tools. It only calls `delegate_to_coder` and `delegate_to_reviewer` (custom MCP tools defined in-process).
-- **Coder** has `Edit`, `Write`, `Read`, `Glob`, `Grep`, `Bash`. Works inside the mission's git worktree.
-- **Reviewer** has read-only tools + `Bash` for running tests. Returns `APPROVE` or `REJECT`.
-- Each role has its own Claude session with `resume` support across turns.
-- All behavioral guardrails live in `CLAUDE.md` (Karpathy-inspired rules).
+**Engineering agents** (CEO, Coder, Reviewer, Librarian) are hard-coded in TypeScript with fixed system prompts. They work on code repos via git worktrees.
 
-## Setup
+**Workspace agents** (x-researcher, x-marketer, and any you hire) are config-driven. Each has a directory with `role.md`, `agent.json`, and `CLAUDE.md`. A generic `runAgent()` loads the workspace, composes a layered prompt, and runs the session. Behavior is tuned by editing markdown, not code.
+
+## Quick start
 
 ```bash
 cd swarm
-cp .env.example .env
-# fill in DISCORD_TOKEN, ANTHROPIC_API_KEY, channel IDs, user IDs, and SWARM_REPO_PATH
-npm install
-npm run dev
+cp .env.example .env          # fill in your values
+pnpm install
+pnpm dev
 ```
 
-### Required env vars
+## Environment variables
 
-| var | purpose |
-|---|---|
-| `DISCORD_TOKEN` | Bot token from the Discord developer portal |
-| `DISCORD_CEO_CHANNEL_ID` | Channel where humans post mission briefs |
-| `DISCORD_WORKSHOP_CHANNEL_ID` | Channel where Coder/Reviewer progress streams |
-| `DISCORD_ALLOWED_USER_IDS` | Comma-separated Discord user IDs allowed to command the CEO |
-| `ANTHROPIC_API_KEY` | Claude API key |
-| `SWARM_REPO_PATH` | Absolute path to the target git repo the Coder will edit |
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `DISCORD_TOKEN` | Yes | Bot token from the Discord developer portal |
+| `DISCORD_CEO_CHANNEL_ID` | Yes | Channel where humans post coding missions |
+| `DISCORD_WORKSHOP_CHANNEL_ID` | No | Channel for Coder/Reviewer progress (defaults to CEO channel) |
+| `DISCORD_ALLOWED_USER_IDS` | Yes | Comma-separated Discord user IDs allowed to command the bot |
+| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `SWARM_REPO_PATH` | Yes | Absolute path to the target git repo the Coder edits |
+| `SWARM_WORKTREE_ROOT` | No | Worktree location (default `./worktrees`) |
+| `SWARM_DB_PATH` | No | SQLite database path (default `./data/swarm.db`) |
+| `SWARM_WIKI_PATH` | No | Wiki location (default `./wiki`) |
+| `SWARM_SCRATCHPAD_ROOT` | No | Scratchpad location (default `./scratchpads`) |
+| `SWARM_MISSION_TIMEOUT_MS` | No | CEO mission timeout (default 1800000 = 30 min) |
+| `SWARM_LIBRARIAN_TIMEOUT_MS` | No | Librarian session timeout (default 600000 = 10 min) |
+| `DISCORD_DEPARTMENT_CHANNELS` | No | Comma-separated `channelId:department` pairs for workspace agents |
+| `XURL_PATH` | No | Path to `xurl` CLI binary for X/Twitter posting (default `xurl`) |
 
 ### Discord bot setup
 
 1. Create an application at https://discord.com/developers/applications
 2. Add a Bot. Enable **Message Content Intent**.
-3. Invite the bot to your server with `bot` scope and these permissions: Read Messages, Send Messages, Create Public Threads, Send Messages in Threads.
-4. Copy channel IDs (Developer Mode → right click channel → Copy ID).
+3. Invite the bot to your server with `bot` scope and permissions: Read Messages, Send Messages, Create Public Threads, Send Messages in Threads, Add Reactions.
+4. Copy channel IDs (Developer Mode -> right click channel -> Copy ID).
 
-## Usage
+## Engineering pipeline (CEO/Coder/Reviewer)
 
 1. Post a mission in the `#ceo` channel: *"Add rate limiting middleware to POST /api/auth/login"*
 2. Bot creates a thread, spins up a worktree, launches the CEO session.
-3. CEO plans, calls `delegate_to_coder`, which runs the Coder inside the worktree.
-4. CEO calls `delegate_to_reviewer` on the resulting diff.
-5. CEO summarizes in the thread. If approved, you can manually merge the worktree branch.
-6. Reply in the thread to send follow-up instructions to the same mission.
+3. CEO plans, delegates to Coder, then to Reviewer.
+4. CEO summarizes in the thread. If approved, manually merge the worktree branch.
+5. Reply in the thread to send follow-up instructions to the same mission.
 
-## Layout
-
-```
-swarm/
-├── CLAUDE.md                  # Karpathy-inspired rules (all agents inherit these)
-├── src/
-│   ├── index.ts               # entry
-│   ├── config.ts              # env loading
-│   ├── discord/
-│   │   ├── client.ts
-│   │   └── handlers.ts        # message → mission → CEO dispatch
-│   ├── agents/
-│   │   ├── prompts.ts         # CEO / Coder / Reviewer system prompts
-│   │   ├── ceo.ts
-│   │   ├── coder.ts
-│   │   └── reviewer.ts
-│   ├── tools/
-│   │   └── delegate.ts        # in-process MCP server: delegate_to_coder / _reviewer
-│   └── missions/
-│       ├── store.ts           # SQLite: missions + session IDs
-│       └── worktree.ts        # git worktree create/diff/merge/remove
-├── worktrees/                 # mission worktrees (gitignored)
-└── data/                      # SQLite DB (gitignored)
-```
-
-## Wiki (persistent memory)
-
-The swarm maintains an institutional-memory wiki at `swarm/wiki/` — its own git repo, LLM-maintained by the Librarian agent. See `swarm/wiki/CLAUDE.md` for the schema.
-
-- **Ingest a source:** DM the bot `/ingest <url-or-text>` or drop a markdown/text attachment with `/ingest` as the message body.
-- **Ask a wiki question:** talk to the CEO normally. It has read-only wiki tools.
-- **Browse:** open `swarm/wiki/` as an Obsidian vault.
-- **Automatic mission capture:** when a reviewer approves a mission, a background Librarian session files it into `wiki/missions/<id>.md` and updates any affected entity/concept/project pages. Runs non-blocking; failures are logged to `wiki/inbox/_errors/`.
-- **Agent scratchpads:** each agent (CEO, Coder, Reviewer) has its own private notes dir under `swarm/scratchpads/<role>/`. Agents use them for in-flight reasoning and lessons they don't want to forget.
-- **Cross-agent notes:** any agent can call `submit_to_librarian` with a durable finding. The Librarian picks it up from `wiki/inbox/` on its next task.
-- **Wiki commands in Discord:**
-  - `/lint` — structural health check (orphans, broken links, empty pages, missing front-matter).
-  - `/wiki <query>` — search the wiki; returns top 10 hits with snippets.
-  - `/recent [N]` — last N entries from the wiki log (default 20, max 200).
-- **PDF ingestion:** attach a `.pdf` file with `/ingest` as the message body — the bot extracts text locally and hands it to the Librarian.
-
-Environment variables:
-
-- `SWARM_WIKI_PATH` — wiki location (default `./wiki`).
-- `SWARM_SCRATCHPAD_ROOT` — scratchpad location (default `./scratchpads`).
-- `SWARM_LIBRARIAN_TIMEOUT_MS` — max duration of a single Librarian session (default 600000 = 10 min).
+Also works in DMs with the bot.
 
 ## Agent Workspaces (Hire-by-Copy)
 
-Beyond the hard-coded CEO/Coder/Reviewer pipeline, the swarm supports **workspace-based agents** that you create by "hiring" — copying a role file from a skill library and customizing its procedures. No TypeScript needed.
-
 ### How it works
 
-Each agent is a directory under `agents/<id>/`:
+Each workspace agent is a directory under `agents/<id>/`:
 
 ```
 agents/x-researcher/
-├── role.md           # identity (copied from agency-agents library)
-├── agent.json        # config: department, model, tools
-├── CLAUDE.md         # swarm-specific procedures you edit
+├── role.md           # identity — copied from agency-agents library
+├── agent.json        # config: department, model, native tools, MCP tools
+├── CLAUDE.md         # procedures you write and iterate on
 ├── memory/           # persistent cross-mission notes
 │   └── MEMORY.md
 └── scratchpad/       # per-mission working notes
 ```
 
-A generic `runAgent()` function loads the workspace, composes a layered system prompt (role.md + shared skills + CLAUDE.md + Karpathy rules), mounts MCP tools based on `agent.json`, and runs the Claude session.
+At runtime, `runAgent()` composes a layered system prompt:
+
+```
+role.md                           ← who you are (identity, expertise)
+  + skills/shared/*.md            ← company-wide conventions (wiki, drafts)
+  + agents/<id>/CLAUDE.md         ← this agent's specific procedures
+  + KARPATHY_RULES                ← think before coding, simplicity first, etc.
+```
+
+Tools are mounted based on `agent.json`:
+- **Native tools** (Read, Write, Edit, Glob, Grep) — direct file access on the wiki
+- **MCP tools** (fetch_url, xurl_get, propose_publish, submit_to_librarian) — only for security boundaries and cross-system actions
 
 ### Hiring a new agent
 
@@ -148,104 +127,194 @@ pnpm hire linkedin-writer \
   --tools Read,Write,Edit,Glob,Grep
 ```
 
-This creates `agents/linkedin-writer/` with:
-- `role.md` copied from the source file
-- `agent.json` with your specified config
-- A starter `CLAUDE.md` you should edit with department-specific procedures
+This scaffolds `agents/linkedin-writer/` with a copied `role.md`, generated `agent.json`, and a starter `CLAUDE.md` you should customize.
 
 ### Customizing an agent
 
-**Tune behavior:** edit `agents/<id>/CLAUDE.md` — this is the procedures layer. Add rules like "always check drafts/README.md first" or "maximum 280 characters for X posts."
-
-**Tune identity:** edit `agents/<id>/role.md` — this is the personality/expertise layer. Add your brand voice, remove capabilities you don't want.
-
-**Change tools:** edit `agents/<id>/agent.json`:
-- `nativeTools` — which file tools the agent gets: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`
-- `mcpTools` — which MCP tools to mount: `fetch_url`, `submit_to_librarian`, `xurl_get`, `propose_publish`
-- `model` — which Claude model to use
-- `department` — which Discord channel routes to this agent
+| What to change | File to edit | Effect |
+| --- | --- | --- |
+| Behavior and procedures | `agents/<id>/CLAUDE.md` | "Always read drafts/README.md first", "Max 280 chars for X" |
+| Identity and expertise | `agents/<id>/role.md` | Brand voice, domain knowledge, removed capabilities |
+| Tools and permissions | `agents/<id>/agent.json` | `nativeTools`, `mcpTools`, `model`, `department` |
+| Company-wide conventions | `skills/shared/*.md` | Loaded into ALL workspace agents |
 
 ### Connecting to Discord
 
-Set `DISCORD_DEPARTMENT_CHANNELS` in `.env` as comma-separated `channelId:department` pairs:
+Map department channels in `.env`:
 
 ```env
 DISCORD_DEPARTMENT_CHANNELS=123456789:research,987654321:marketing
 ```
 
-Messages in those channels route to the first agent registered in that department. The agent gets a thread per mission with session resume support.
+Messages in those channels route to the first agent registered in that department. Each mission gets a thread with session resume support.
 
 ### Content pipeline (Research + Marketing)
 
-Two pre-hired agents demonstrate the full content pipeline:
+Two pre-hired agents form an end-to-end X/Twitter content pipeline:
 
-1. **`#research` channel** — `x-researcher` drafts X/LinkedIn posts into `wiki/drafts/`
-2. **`#marketing` channel** — `x-marketer` reviews drafts, calls `propose_publish`
-3. **Approval marker** appears in `#marketing` with the post text
-4. **React ✅** on the marker → Publisher module runs `xurl --auth oauth2` → tweet goes live
-5. **React ❌** → draft marked as rejected
+```
+#research                    wiki/drafts/               #marketing                X/Twitter
+    │                            │                          │                        │
+    ▼                            ▼                          ▼                        ▼
+ x-researcher ──Write──▶  draft.md          x-marketer ──propose_publish──▶  approval msg
+                         (status: ready)                                     human ✅
+                                                                                │
+                                                                          Publisher ──xurl──▶ tweet
+                                                                                │
+                                                                     draft.md (status: published)
+```
 
-Drafts live in `wiki/drafts/` as Markdown with YAML frontmatter. Status lifecycle: `draft → ready-for-review → awaiting-approval → published → measured`.
+1. Post in `#research`: *"Draft an X post about AI agents. Under 240 chars."*
+2. x-researcher fetches sources, writes draft to `wiki/drafts/`, marks `ready-for-review`
+3. Post in `#marketing`: *"Check for ready drafts and propose publishing the best one."*
+4. x-marketer reads draft, calls `propose_publish` -> approval marker appears in `#marketing`
+5. React ✅ on the marker -> Publisher runs `xurl --auth oauth2` -> tweet goes live
+6. React ❌ -> draft marked as rejected
 
-Required env vars for the content pipeline:
+Drafts are Markdown files with YAML frontmatter. Status lifecycle:
 
-| var | purpose |
-|---|---|
-| `DISCORD_DEPARTMENT_CHANNELS` | Comma-separated `channelId:department` pairs |
-| `XURL_PATH` | Path to `xurl` CLI binary (default: `xurl`) |
+```
+draft → ready-for-review → awaiting-approval → published → measured
+         │                                      │
+         └──→ rejected ←────────────────────────┘
+```
 
-### Shared skills
+## Wiki (persistent memory)
 
-Files in `skills/shared/*.md` are loaded into every workspace agent's system prompt. Use them for company-wide conventions (wiki structure, drafts lifecycle, etc.).
+The swarm maintains an institutional-memory wiki at `wiki/` — its own git repo, maintained by the Librarian agent. See `wiki/CLAUDE.md` for the schema.
 
-### Layout (new files)
+```
+wiki/
+├── CLAUDE.md        # Librarian's constitution (schema, rules)
+├── index.md         # entry point
+├── log.md           # append-only chronological log
+├── entities/        # people, companies, tools
+├── concepts/        # ideas, patterns, decisions
+├── projects/        # long-running initiatives
+├── sources/         # ingested external content
+├── missions/        # completed swarm missions (auto-captured)
+├── drafts/          # content pipeline drafts
+└── inbox/           # staging area for unprocessed drops
+```
+
+**Commands in Discord (DM or channel):**
+
+| Command | What it does |
+| --- | --- |
+| `/ingest <url-or-text>` | Librarian ingests source into wiki |
+| `/ingest` + PDF attachment | Extracts text, then ingests |
+| `/lint` | Wiki health check (orphans, broken links, empty pages) |
+| `/wiki <query>` | Search wiki, top 10 hits with snippets |
+| `/recent [N]` | Last N log entries (default 20, max 200) |
+
+**Automatic behaviors:**
+- Approved missions are captured into `wiki/missions/<id>.md` by a background Librarian session
+- Any agent can call `submit_to_librarian` to file durable findings into `wiki/inbox/`
+- Each agent has a private scratchpad under `scratchpads/<role>/`
+
+## Project layout
 
 ```
 swarm/
-├── agents/                       # agent workspaces (one dir per agent)
-│   ├── x-researcher/             # research agent
-│   └── x-marketer/               # marketing agent
+├── agents/                          # workspace agent directories
+│   ├── x-researcher/                #   research agent (from marketing-content-creator)
+│   └── x-marketer/                  #   marketing agent (from marketing-twitter-engager)
 ├── skills/
 │   └── shared/
-│       └── wiki-conventions.md   # loaded into all agents
+│       └── wiki-conventions.md      #   loaded into all workspace agents
+├── wiki/                            # persistent wiki (own git repo, gitignored)
 ├── src/
+│   ├── index.ts                     # entry point
+│   ├── config.ts                    # env loading with lazy getters
+│   ├── discord/
+│   │   ├── client.ts                # Discord.js client setup
+│   │   └── handlers.ts             # message routing: CEO, departments, ingest, wiki queries
 │   ├── agents/
-│   │   ├── agent-config.ts       # AgentConfig type + validator
-│   │   ├── registry.ts           # loads agents/*/agent.json
-│   │   ├── compose-prompt.ts     # layered prompt assembly
-│   │   ├── runner.ts             # generic runAgent()
-│   │   └── hire.ts               # pnpm hire CLI
+│   │   ├── prompts.ts              # CEO/Coder/Reviewer/Librarian system prompts
+│   │   ├── ceo.ts                  # CEO orchestrator runner
+│   │   ├── coder.ts                # Coder runner (git worktree)
+│   │   ├── reviewer.ts            # Reviewer runner (read-only)
+│   │   ├── librarian.ts           # Librarian runner (wiki write)
+│   │   ├── agent-config.ts        # AgentConfig type + validator
+│   │   ├── registry.ts            # loads agents/*/agent.json at startup
+│   │   ├── compose-prompt.ts      # layers role.md + skills + CLAUDE.md + Karpathy rules
+│   │   ├── runner.ts              # generic runAgent() for workspace agents
+│   │   └── hire.ts                # pnpm hire CLI script
 │   ├── tools/
-│   │   ├── drafts-fs.ts          # draft frontmatter + state machine
-│   │   ├── marketing-read.ts     # xurl_get MCP (read-only Twitter)
-│   │   └── propose-publish.ts    # propose_publish MCP
-│   └── publisher/
-│       ├── xurl.ts               # postToX via xurl CLI
-│       ├── approval-store.ts     # SQLite: pending approvals
-│       └── approval.ts           # Discord reaction handler
+│   │   ├── delegate.ts            # CEO's delegate_to_coder/_reviewer/_librarian MCP
+│   │   ├── wiki.ts                # wiki MCP servers (reader + librarian)
+│   │   ├── wiki-fs.ts             # wiki filesystem operations
+│   │   ├── wiki-git.ts            # wiki git commit
+│   │   ├── wiki-paths.ts          # path security (safeResolve)
+│   │   ├── personal.ts            # per-agent scratchpad + submit_to_librarian MCP
+│   │   ├── scratchpad-fs.ts       # scratchpad filesystem
+│   │   ├── submit-inbox.ts        # inbox drop helper
+│   │   ├── lint.ts                # wiki structural linter
+│   │   ├── pdf.ts                 # PDF text extraction
+│   │   ├── drafts-fs.ts           # draft frontmatter parser + state machine
+│   │   ├── marketing-read.ts      # xurl_get MCP (read-only Twitter API)
+│   │   └── propose-publish.ts     # propose_publish MCP (approval flow trigger)
+│   ├── publisher/
+│   │   ├── xurl.ts                # postToX via xurl CLI
+│   │   ├── approval-store.ts      # SQLite: pending approval messages
+│   │   └── approval.ts            # Discord ✅/❌ reaction handler
+│   └── missions/
+│       ├── store.ts               # SQLite: missions + agent sessions
+│       ├── worktree.ts            # git worktree create/diff/merge/remove
+│       └── capture.ts             # background mission capture to wiki
+├── worktrees/                      # mission worktrees (gitignored)
+├── scratchpads/                    # agent scratchpads (gitignored)
+├── data/                           # SQLite DB (gitignored)
+├── tests/                          # vitest test files
+├── CLAUDE.md                       # Karpathy-inspired rules (all agents inherit)
+└── package.json
 ```
 
-## Extending (code agents)
+## Adding new agents
 
-Add a new role to the CEO pipeline (e.g. Researcher):
-1. Add `RESEARCHER_SYSTEM_PROMPT` in `src/agents/prompts.ts`.
-2. Create `src/agents/researcher.ts` mirroring `reviewer.ts`.
-3. Add a `delegate_to_researcher` tool in `src/tools/delegate.ts`.
-4. Whitelist it in `allowedTools` inside `src/agents/ceo.ts`.
+### Workspace agents (no TypeScript)
 
-## Extending (workspace agents)
+```bash
+# 1. Hire from the agency-agents library
+pnpm hire strategy-analyst \
+  --role ../agency-agents/strategy/nexus-strategy.md \
+  --department strategy \
+  --tools Read,Glob,Grep
 
-Add a new non-code agent — **no TypeScript needed:**
-1. `pnpm hire <name> --role <file> --department <dept> --tools <tools>`
-2. Edit `agents/<name>/CLAUDE.md` with procedures
-3. Add a Discord channel and map it in `DISCORD_DEPARTMENT_CHANNELS`
-4. Restart the bot
+# 2. Customize procedures
+vim agents/strategy-analyst/CLAUDE.md
 
-## Notes & caveats
+# 3. Add a Discord channel
+# In .env: DISCORD_DEPARTMENT_CHANNELS=...,<channel-id>:strategy
 
-- **Merging is manual on purpose.** The bot never pushes or merges without you.
-- **Publishing requires human approval.** Agents cannot post to X/LinkedIn — only `propose_publish` + your ✅ reaction triggers the Publisher.
-- **Bash is allowlisted loosely.** Tighten `allowedTools` in `coder.ts` before pointing this at anything important.
+# 4. Restart
+pnpm dev
+```
+
+### Engineering pipeline agents (TypeScript)
+
+1. Add system prompt in `src/agents/prompts.ts`
+2. Create runner in `src/agents/<role>.ts` mirroring `reviewer.ts`
+3. Add delegation tool in `src/tools/delegate.ts`
+4. Whitelist in `allowedTools` in `src/agents/ceo.ts`
+
+## Available npm scripts
+
+| Script | Purpose |
+| --- | --- |
+| `pnpm dev` | Start with hot reload |
+| `pnpm start` | Start (production) |
+| `pnpm build` | TypeScript compile |
+| `pnpm typecheck` | Type check without emitting |
+| `pnpm test` | Run vitest suite |
+| `pnpm test:watch` | Watch mode tests |
+| `pnpm hire` | Scaffold a new workspace agent |
+
+## Notes and caveats
+
+- **Merging is manual.** The bot never pushes or merges code without you.
+- **Publishing requires human approval.** Agents cannot post to X/LinkedIn directly — only `propose_publish` + your ✅ reaction triggers the Publisher.
 - **LinkedIn publishing** is not yet implemented (X only via `xurl`).
-- **One agent per department** currently. For multi-agent departments, add `@agent` prefix routing.
-- **Mission timeout** is not yet enforced — add `AbortController` around `runAgent` when needed.
+- **One agent per department** currently. For multi-agent departments, add `@agent` prefix routing later.
+- **Mission timeout** is not yet enforced in code for workspace agents.
+- **Bash is allowlisted loosely** in `coder.ts`. Tighten before pointing at production repos.
