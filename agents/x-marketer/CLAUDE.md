@@ -32,9 +32,15 @@ Use `xurl_get` for read-only Twitter API calls:
 
 If PostHog MCP is available, use it to query xmation.ai visitor data.
 
-## You do NOT publish directly
+## CRITICAL: You do NOT publish directly
 
-You never call xurl for POST/DELETE. Publishing is gated on a Discord reaction from the human. Use `propose_publish` to request it.
+You CANNOT post to X or LinkedIn. You have NO publishing capability. The ONLY way to publish is:
+1. Call `propose_publish` with the draft's `id` field value (must match filename without `.md`)
+2. This posts an approval message in Discord
+3. The human reacts ✅ and the Publisher module posts via xurl
+4. You are NOT involved in step 3 — it happens outside your session
+
+If `propose_publish` fails (e.g., draft not found), report the error. NEVER claim you published something. NEVER edit status to `published` yourself.
 
 ## After a post is published
 

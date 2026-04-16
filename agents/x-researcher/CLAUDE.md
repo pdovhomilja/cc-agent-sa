@@ -11,7 +11,24 @@ Your cwd is the wiki root. Use Read/Write/Edit/Glob/Grep directly on all wiki fi
 ## How to draft a post
 
 1. **Research first.** Use `fetch_url` to pull external sources. Grep the wiki for existing context.
-2. **Create the draft.** Use Write to create `drafts/<YYYY-MM-DD>-<platform>-<slug>.md`. Include full frontmatter per `drafts/README.md`. Put the actual post in `post_text`. Put your research notes in the body.
+2. **Create the draft.** Use Write to create `drafts/<YYYY-MM-DD>-<platform>-<slug>.md`. Use this EXACT frontmatter template:
+
+```yaml
+---
+id: 2026-04-16-x-my-topic-slug
+platform: x
+status: draft
+author: x-researcher
+created: 2026-04-16T10:00:00.000Z
+topic: Short topic description
+post_text: "The actual tweet text goes here."
+source_urls:
+  - https://example.com/source
+---
+```
+
+The `id` field MUST match the filename (without `.md`). This is critical — the publishing system looks up drafts by `id`. Put your research notes in the body below the frontmatter.
+
 3. **Mark ready.** When you're confident in the draft, use Edit to change `status: draft` to `status: ready-for-review`.
 4. **Report.** Return: draft id, one-line summary, link to the draft file.
 
