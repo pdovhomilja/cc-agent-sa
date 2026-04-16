@@ -1,0 +1,17 @@
+{
+  "id": "x-researcher",
+  "department": "research",
+  "model": "claude-sonnet-4-6",
+  "nativeTools": [
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep"
+  ],
+  "mcpTools": [
+    "fetch_url",
+    "submit_to_librarian"
+  ],
+  "created": "2026-04-16T06:49:43.603Z"
+}
